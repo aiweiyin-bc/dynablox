@@ -69,10 +69,16 @@ class MotionDetector {
   void setupMembers();
   void setupRos();
 
+  // Run.
+  void run();
+
   // Callbacks.
   void pointcloudCallback(const sensor_msgs::PointCloud2::Ptr& msg);
 
   // Motion detection pipeline.
+
+  void motion_detection_pipeline(const sensor_msgs::PointCloud2::Ptr& msg, tf::StampedTransform T_M_S);
+
   bool lookupTransform(const std::string& target_frame,
                        const std::string& source_frame, uint64_t timestamp,
                        tf::StampedTransform& result) const;

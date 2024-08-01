@@ -116,30 +116,13 @@ void MotionDetector::setupMembers() {
 }
 
 void MotionDetector::setupRos() {
-  lidar_pcl_sub_ = nh_.subscribe("pointcloud", config_.queue_size,
-                                 &MotionDetector::pointcloudCallback, this);
+  // lidar_pcl_sub_ = nh_.subscribe("pointcloud", config_.queue_size,
+  //                                &MotionDetector::pointcloudCallback, this);
 }
 
-void MotionDetector::pointcloudCallback(
-    const sensor_msgs::PointCloud2::Ptr& msg) {
-  Timer frame_timer("frame");
+
+void  MotionDetector::motion_detection_pipeline(const sensor_msgs::PointCloud2::Ptr& msg, tf::StampedTransform T_M_S) {
   Timer detection_timer("motion_detection");
-
-  // Lookup cloud transform T_M_S of sensor (S) to map (M).
-  // If different sensor frame is required, update the message.
-  Timer tf_lookup_timer("motion_detection/tf_lookup");
-  const std::string sensor_frame_name = config_.sensor_frame_name.empty()
-                                            ? msg->header.frame_id
-                                            : config_.sensor_frame_name;
-
-  tf::StampedTransform T_M_S;
-  if (!lookupTransform(config_.global_frame_name, sensor_frame_name,
-                       msg->header.stamp.toNSec(), T_M_S)) {
-    // Getting transform failed, need to skip.
-    return;
-  }
-  tf_lookup_timer.Stop();
-
   // Preprocessing.
   Timer preprocessing_timer("motion_detection/preprocessing");
   frame_counter_++;
@@ -199,6 +182,71 @@ void MotionDetector::pointcloudCallback(
     visualizer_->visualizeAll(cloud, cloud_info, clusters);
     vis_timer.Stop();
   }
+}
+
+void MotionDetector::run() {
+
+    std::ifstream timestamp_file("/workspace/data/megalog_data/bpearl_timestamp.txt"); // Change "timestamps.txt" to your file's path
+    std::ifstream pose_file("/workspace/data/megalog_data/bpearl_pose.txt"); // Change "timestamps.txt" to your file's path
+
+    std::string timestamp_line;
+
+    if  ((!timestamp_file.is_open()) || (!pose_file.is_open())) {
+        std::cerr << "Unable to open file" << std::endl;
+        return;
+    }
+    int idx = 0;
+    float timestamp;
+    float x, y, z, qx, qy, qz, qw;
+    while (timestamp_file >> timestamp) {
+        pose_file >> x >> y >> z >> qw >> qx >> qy >> qz;
+        tf::StampedTransform T_M_S;
+        T_M_S.setOrigin(tf::Vector3(x, y, z));
+        T_M_S.setRotation(tf::Quaternion(qx, qy, qz, qw));
+
+        // read pointcloud from .pcd
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
+        std::string pcd_file = "/workspace/data/megalog_data/bpearl_pcd/" + std::to_string(idx) + ".pcd";
+        if (pcl::io::loadPCDFile<pcl::PointXYZ> (pcd_file, *cloud) == -1) //* load the file
+        {
+            PCL_ERROR ("Couldn't read file test_pcd.pcd \n");
+            return;
+        }
+        // Convert to ROS data type
+        sensor_msgs::PointCloud2::Ptr cloud_msg(new sensor_msgs::PointCloud2);
+        pcl::toROSMsg(*cloud, *cloud_msg);
+        // Set timestamp
+        cloud_msg->header.stamp = ros::Time(timestamp);
+        
+        // Run the motion detection pipeline.
+        motion_detection_pipeline(cloud_msg, T_M_S);
+    }
+    timestamp_file.close();
+    pose_file.close();
+    return ;
+}
+
+void MotionDetector::pointcloudCallback(
+    const sensor_msgs::PointCloud2::Ptr& msg) {
+  Timer frame_timer("frame");
+
+  // Lookup cloud transform T_M_S of sensor (S) to map (M).
+  // If different sensor frame is required, update the message.
+  Timer tf_lookup_timer("motion_detection/tf_lookup");
+  const std::string sensor_frame_name = config_.sensor_frame_name.empty()
+                                            ? msg->header.frame_id
+                                            : config_.sensor_frame_name;
+
+  tf::StampedTransform T_M_S;
+  if (!lookupTransform(config_.global_frame_name, sensor_frame_name,
+                       msg->header.stamp.toNSec(), T_M_S)) {
+    // Getting transform failed, need to skip.
+    return;
+  }
+  tf_lookup_timer.Stop();
+
+  // Run the motion detection pipeline.
+  motion_detection_pipeline(msg, T_M_S);
 }
 
 bool MotionDetector::lookupTransform(const std::string& target_frame,

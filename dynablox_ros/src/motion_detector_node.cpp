@@ -20,6 +20,8 @@ int main(int argc, char** argv) {
   ros::NodeHandle nh_private("~");
   dynablox::MotionDetector motion_detector(nh, nh_private);
 
+  motion_detector.run();
+
   ros::spin();
   return 0;
 }
